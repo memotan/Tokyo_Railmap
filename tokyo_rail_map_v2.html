@@ -3,7 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="東京都の鉄道路線図。実際の地理形状に基づき、JR・東京メトロ・都営・私鉄各線の路線と駅を表示するインタラクティブマップ。">
 <title>東京都 路線マップ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=Space+Mono:wght@400;700&display=swap');
   :root {
@@ -24,6 +27,7 @@
   .operator-label{padding:7px 13px 3px;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-family:'Space Mono',monospace}
   .line-item{display:flex;align-items:center;gap:8px;padding:4px 13px;cursor:pointer;transition:background .1s;user-select:none}
   .line-item:hover{background:rgba(0,0,0,.04)}
+  .line-item:focus-visible,.btn-all:focus-visible,.ctrl-btn:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
   .line-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;border:2px solid;transition:opacity .2s}
   .line-name{font-size:11px;color:var(--text);transition:opacity .2s;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .line-item.off .line-dot,.line-item.off .line-name{opacity:.28}
@@ -64,8 +68,8 @@
     <div class="sidebar-header">
       路線選択
       <div style="display:flex;gap:4px">
-        <button class="btn-all" onclick="setAll(true)">全ON</button>
-        <button class="btn-all" onclick="setAll(false)">全OFF</button>
+        <button class="btn-all" id="btn-all-on">全ON</button>
+        <button class="btn-all" id="btn-all-off">全OFF</button>
       </div>
     </div>
   </div>
@@ -79,9 +83,9 @@
     </svg>
     <div id="tooltip"><div id="tt-name"></div><div id="tt-line"></div></div>
     <div class="controls">
-      <button class="ctrl-btn" onclick="zoom(1.3)" title="拡大">＋</button>
-      <button class="ctrl-btn" onclick="zoom(0.77)" title="縮小">－</button>
-      <button class="ctrl-btn" onclick="resetView()" title="全体表示" style="font-size:11px">⌂</button>
+      <button class="ctrl-btn" id="btn-zoom-in" title="拡大" aria-label="拡大">＋</button>
+      <button class="ctrl-btn" id="btn-zoom-out" title="縮小" aria-label="縮小">－</button>
+      <button class="ctrl-btn" id="btn-reset-view" title="全体表示" aria-label="全体表示" style="font-size:11px">⌂</button>
     </div>
   </div>
 </div>
@@ -96,6 +100,9 @@ const My=[10.2043005,-1103.99817,38357.2549];
 function ll2svg(lon,lat){
   return [Mx[0]*lon+Mx[1]*lat+Mx[2], My[0]*lon+My[1]*lat+My[2]];
 }
+
+// Map viewBox base size and zoom bounds
+const VIEW_W=900, VIEW_H=750, ZOOM_MIN=0.4, ZOOM_MAX=12;
 
 // ── DRAW DISTRICTS ───────────────────────────────────────────
 const distLayer = document.getElementById('districts-layer');
@@ -166,6 +173,7 @@ OPERATORS.forEach(op => {
 });
 
 // ── TOOLTIP ──────────────────────────────────────────────────
+const mapAreaEl=document.querySelector('.map-area');
 const tooltip=document.getElementById('tooltip');
 const ttName=document.getElementById('tt-name');
 const ttLine=document.getElementById('tt-line');
@@ -178,13 +186,13 @@ function showTip(e){
 }
 function hideTip(){tooltip.classList.remove('visible')}
 function moveTip(e){
-  const r=document.querySelector('.map-area').getBoundingClientRect();
+  const r=mapAreaEl.getBoundingClientRect();
   let tx=e.clientX-r.left+12, ty=e.clientY-r.top-34;
   if(tx+185>r.width) tx-=195;
   if(ty<0) ty=5;
   tooltip.style.left=tx+'px'; tooltip.style.top=ty+'px';
 }
-document.querySelector('.map-area').addEventListener('mousemove',e=>{
+mapAreaEl.addEventListener('mousemove',e=>{
   if(tooltip.classList.contains('visible')) moveTip(e);
 });
 
@@ -256,11 +264,16 @@ OPERATORS.forEach(op=>{
   grp.appendChild(lbl);
   op.lines.forEach(line=>{
     const item=document.createElement('div'); item.className='line-item'; item.dataset.lid=line.id;
+    item.setAttribute('role','button'); item.setAttribute('tabindex','0');
+    item.setAttribute('aria-pressed','true');
     const dot=document.createElement('div'); dot.className='line-dot';
     dot.style.borderColor=line.color; dot.style.backgroundColor=line.color+'33';
     const nm=document.createElement('div'); nm.className='line-name'; nm.textContent=line.name;
     item.appendChild(dot); item.appendChild(nm);
     item.addEventListener('click',()=>toggle(line.id,item));
+    item.addEventListener('keydown',e=>{
+      if(e.key==='Enter'||e.key===' '){e.preventDefault();toggle(line.id,item);}
+    });
     grp.appendChild(item);
   });
   sidebar.appendChild(grp);
@@ -269,6 +282,7 @@ OPERATORS.forEach(op=>{
 function toggle(id,el){
   lineState[id]=!lineState[id];
   el.classList.toggle('off',!lineState[id]);
+  el.setAttribute('aria-pressed',String(lineState[id]));
   updateVis(id);
 }
 function updateVis(id){
@@ -278,41 +292,61 @@ function updateVis(id){
 }
 function setAll(on){
   Object.keys(lineState).forEach(id=>{lineState[id]=on;updateVis(id);});
-  document.querySelectorAll('.line-item').forEach(i=>i.classList.toggle('off',!on));
+  document.querySelectorAll('.line-item').forEach(i=>{
+    i.classList.toggle('off',!on);
+    i.setAttribute('aria-pressed',String(on));
+  });
 }
+document.getElementById('btn-all-on').addEventListener('click',()=>setAll(true));
+document.getElementById('btn-all-off').addEventListener('click',()=>setAll(false));
 
 // ── PAN / ZOOM ───────────────────────────────────────────────
 let vx=0,vy=0,vs=1,drag=false,dx0,dy0,vx0,vy0;
 const svg=document.getElementById('map-svg');
-function applyT(){svg.setAttribute('viewBox',`${vx} ${vy} ${900/vs} ${750/vs}`)}
+function applyT(){svg.setAttribute('viewBox',`${vx} ${vy} ${VIEW_W/vs} ${VIEW_H/vs}`)}
+function zoomAt(clientX,clientY,factor){
+  const r=svg.getBoundingClientRect();
+  const mx=(clientX-r.left)/r.width*(VIEW_W/vs)+vx;
+  const my=(clientY-r.top)/r.height*(VIEW_H/vs)+vy;
+  vs=Math.max(ZOOM_MIN,Math.min(ZOOM_MAX,vs*factor));
+  vx=mx-(clientX-r.left)/r.width*(VIEW_W/vs);
+  vy=my-(clientY-r.top)/r.height*(VIEW_H/vs);
+  applyT();
+}
 svg.addEventListener('mousedown',e=>{if(e.button!==0)return;drag=true;dx0=e.clientX;dy0=e.clientY;vx0=vx;vy0=vy;});
 window.addEventListener('mousemove',e=>{if(!drag)return;vx=vx0-(e.clientX-dx0)/vs;vy=vy0-(e.clientY-dy0)/vs;applyT();});
 window.addEventListener('mouseup',()=>drag=false);
 svg.addEventListener('wheel',e=>{
   e.preventDefault();
   const f=e.deltaY<0?1.15:0.87;
-  const r=svg.getBoundingClientRect();
-  const mx=(e.clientX-r.left)/r.width*(900/vs)+vx;
-  const my=(e.clientY-r.top)/r.height*(750/vs)+vy;
-  vs=Math.max(.4,Math.min(12,vs*f));
-  vx=mx-(e.clientX-r.left)/r.width*(900/vs);
-  vy=my-(e.clientY-r.top)/r.height*(750/vs);
-  applyT();
+  zoomAt(e.clientX,e.clientY,f);
 },{passive:false});
 // touch
-let ltd=null;
+let ltd=null,ltc=null;
 svg.addEventListener('touchstart',e=>{
   if(e.touches.length===1){drag=true;dx0=e.touches[0].clientX;dy0=e.touches[0].clientY;vx0=vx;vy0=vy;}
-  else if(e.touches.length===2){ltd=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);}
+  else if(e.touches.length===2){
+    drag=false;
+    ltd=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+    ltc=[(e.touches[0].clientX+e.touches[1].clientX)/2,(e.touches[0].clientY+e.touches[1].clientY)/2];
+  }
 },{passive:true});
 svg.addEventListener('touchmove',e=>{
   if(e.touches.length===1&&drag){vx=vx0-(e.touches[0].clientX-dx0)/vs;vy=vy0-(e.touches[0].clientY-dy0)/vs;applyT();}
-  else if(e.touches.length===2&&ltd){const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);vs=Math.max(.4,Math.min(12,vs*d/ltd));ltd=d;applyT();}
+  else if(e.touches.length===2&&ltd){
+    const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+    const c=[(e.touches[0].clientX+e.touches[1].clientX)/2,(e.touches[0].clientY+e.touches[1].clientY)/2];
+    zoomAt(c[0],c[1],d/ltd);
+    ltd=d;ltc=c;
+  }
 },{passive:true});
-svg.addEventListener('touchend',()=>{drag=false;ltd=null;});
+svg.addEventListener('touchend',()=>{drag=false;ltd=null;ltc=null;});
 
-function zoom(f){vs=Math.max(.4,Math.min(12,vs*f));applyT()}
+function zoom(f){vs=Math.max(ZOOM_MIN,Math.min(ZOOM_MAX,vs*f));applyT()}
 function resetView(){vx=0;vy=0;vs=1;applyT()}
+document.getElementById('btn-zoom-in').addEventListener('click',()=>zoom(1.3));
+document.getElementById('btn-zoom-out').addEventListener('click',()=>zoom(0.77));
+document.getElementById('btn-reset-view').addEventListener('click',resetView);
 
 // ── LINE THICKNESS SLIDER ─────────────────────────────────────
 const slider=document.getElementById('thickness');
